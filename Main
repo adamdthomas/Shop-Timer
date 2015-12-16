@@ -1,0 +1,73 @@
+// set pin numbers:
+const int buttonPin = 4;     // the number of the pushbutton pin
+const int resetbuttonPin = 3;
+const int ledPin =  0;      // the number of the LED pin
+const int pushledPin = 1;      // the number of the LED pin
+const int relayPin = 2;
+
+// variables will change:
+int resetbuttonState = 0;
+int buttonState = 0; // variable for reading the pushbutton status
+int ledState = 0;
+long timer = 1000;
+
+void setup() {
+  // initialize the LED pin as an output:
+  pinMode(ledPin, OUTPUT);
+  pinMode(pushledPin, OUTPUT);
+  pinMode(relayPin, OUTPUT);
+  pinMode(resetbuttonPin, OUTPUT);
+  // initialize the pushbutton pin as an input:
+  pinMode(buttonPin, INPUT);     
+}
+
+void loop(){
+  // read the state of the pushbutton value:                                                           
+  buttonState = digitalRead(buttonPin);
+  resetbuttonState = digitalRead(resetbuttonPin);
+  
+  // check if the pushbutton is pressed.
+  // if it is, the buttonState is HIGH:
+  
+  if (buttonState == HIGH) {
+    //add 15 min to timer
+    timer = timer + 900000;
+    digitalWrite(pushledPin, HIGH);  
+    delay(250);
+    digitalWrite(pushledPin, LOW);  
+  } 
+  
+  if (resetbuttonState == HIGH) {
+    //add 15 min to timer
+    timer = 0;
+    digitalWrite(pushledPin, HIGH);  
+    delay(100);
+    digitalWrite(pushledPin, LOW);
+    delay(100);
+    digitalWrite(pushledPin, HIGH);  
+    delay(100);
+    digitalWrite(pushledPin, LOW);    
+  } 
+  
+   if (timer > 0)
+    {
+      digitalWrite(ledPin, HIGH);  
+      digitalWrite(relayPin, HIGH);  
+      ledState = HIGH;
+    }
+    else
+    {
+      digitalWrite(ledPin, LOW);  
+      digitalWrite(relayPin, LOW);  
+      ledState = LOW;
+    }
+  delay(10);
+  if(timer > 0)
+  {
+    timer = timer - 10;
+  }
+  else
+  {
+   timer = 0; 
+  }
+}
