@@ -1,0 +1,736 @@
+#include <SPI.h>
+#include <Wire.h>
+#include <WiFi101.h>
+
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+
+
+#define BUTTON_A 9
+#define BUTTON_B 6
+#define BUTTON_C 5
+//#define LED_PIN  13
+
+#define rOne  0
+#define rTwo  19
+#define rThree  15
+#define rFour  14
+//14, 15, 19, 0
+
+
+#define BME_SCK 18//SCK-Brown
+#define BME_MISO 17//SDO-Black
+#define BME_MOSI 16//SDI-White
+#define BME_CS 13//CS-Grey
+
+
+
+
+#define SEALEVELPRESSURE_HPA (1013.25)
+
+Adafruit_SSD1306 display = Adafruit_SSD1306();
+Adafruit_BME280 bme(BME_CS, BME_MOSI, BME_MISO,  BME_SCK);
+
+char ssid[] = "SSIDGOESHERE";
+char pass[] = "PASSGOESHERE";
+
+
+int GreenLED = 12;
+int RedLED = 10;
+
+// your network password
+int keyIndex = 0;                 // your network key Index number (needed only for WEP)
+String Status;
+String DebugString = "";
+int resetbuttonState = 0;
+int buttonState = 0; // variable for reading the pushbutton status
+int ledState = 0;
+
+
+int timetrim = 72;
+int minLeft = 0;
+int hourLeft = 0;
+int secLeft = 0;
+String sSecLeft = "";
+String sMinLeft = "";
+String sHourLeft = "";
+int resetcounter = 0;
+int weather = 10000;
+int low = 5;
+int high = 255;
+String tl;
+String Temp = "";
+String Humidity = "";
+String Pressure = "";
+int GrabTime = 0;
+
+long rOneTimer = 0;
+long rTwoTimer = 0;
+long rThreeTimer = 0;
+long rFourTimer = 0;
+
+boolean rOneON = false;
+boolean rTwoON = false;
+boolean rThreeON = false;
+boolean rFourON = false;
+
+
+int c = 0;
+IPAddress ip;
+IPAddress statIP(192, 168, 1, 18); 
+
+String WelcomeMessage = "ShopBox V:2.1.0";
+int port = 80;
+
+
+int status = WL_IDLE_STATUS;
+WiFiServer server(port);
+
+void setup() {
+
+ 
+
+  WiFi.setPins(8, 7, 4, 2);
+  //Setting up the oled display
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 128x32)
+  display.display();
+  delay(1000);
+
+  // Clear the buffer.(clearing the screen)
+  display.clearDisplay();
+  display.display();
+
+  if (!bme.begin()) {
+    PrintScreenLines(WelcomeMessage, "", "", "No Weather Chip!");
+    fade(RedLED, 10, 15);
+  }
+
+
+
+  //Setting up the screens buttons
+  pinMode(BUTTON_A, INPUT_PULLUP);
+  pinMode(BUTTON_B, INPUT_PULLUP);
+  pinMode(BUTTON_C, INPUT_PULLUP);
+
+  //Display Intro
+  PrintScreenLines(WelcomeMessage, "", "", "");
+
+  //Serial.begin(9600);      // initialize serial communication
+  //pinMode(LED_PIN, OUTPUT);
+
+  pinMode(rOne, OUTPUT); // set the LED pin mode
+  pinMode(rTwo, OUTPUT);
+  pinMode(rThree, OUTPUT);
+  pinMode(rFour, OUTPUT);
+
+
+//Initialize all relays to OFF
+  digitalWrite(rOne, HIGH);
+  delay(200);
+  digitalWrite(rTwo, HIGH);
+  delay(200);
+  digitalWrite(rThree, HIGH);
+  delay(200);
+  digitalWrite(rFour, HIGH);
+  delay(200);
+      
+
+  analogWrite(GreenLED, low);
+  analogWrite(RedLED, high);
+
+  PrintScreenLines(WelcomeMessage, "Checking for WiFi", " Shield...", "");
+  // check for the presence of the shield:
+  if (WiFi.status() == WL_NO_SHIELD) {
+    PrintScreenLines(WelcomeMessage, "Shield not found...", "", "");
+    fade(RedLED, 10, 15);
+    while (true);
+  }
+
+  // attempt to connect to Wifi network:
+  while (status != WL_CONNECTED) {
+    status = WiFi.begin(ssid, pass);
+    PrintScreenLines(WelcomeMessage, "Attempting to connect", "ssid: " + String(ssid), "");
+    fade(GreenLED, 1, 7);
+    delay(1);
+  }
+
+  WiFi.config(statIP); //----------------------------------------------------------------<
+  server.begin();
+
+  printWifiStatus();
+  AlterFade(GreenLED, RedLED, 6, 6);
+  analogWrite(GreenLED, low);
+}
+
+
+void loop() {
+  HandleWeather();
+  RetreiveMessage();
+  UpdateTime();
+  CheckOnWifi();
+}
+
+void HandleWeather(){
+    weather++;
+    if (weather > 9000) {
+      weather = 0;
+      delay(1000);
+      ReadWeather();
+      delay(1000);
+    }
+}
+
+void CheckOnWifi(){
+    if ( WiFi.status() != WL_CONNECTED) {
+      while (WiFi.begin(ssid, pass) != WL_CONNECTED) {
+        fade(GreenLED, 1, 7);
+    }
+    WiFi.config(statIP); 
+    server.begin();
+  }
+}
+
+void ReadWeather() {
+  double t = ((bme.readTemperature() * 9) / 5) + 26;
+  Temp = String(t);
+  double h = bme.readHumidity();
+  Humidity = String(h);
+  double p = bme.readPressure() / 100.0F;
+  Pressure = String(p);
+}
+
+void RetreiveMessage() {
+
+
+  //Reconnect every ~10 seconds
+  resetcounter++;
+  if (resetcounter > 800) {
+    resetcounter = 0;
+    delay(100);
+    server.begin();
+    delay(100);
+    rOneTimer = rOneTimer - 220;
+    rTwoTimer = rTwoTimer - 220;
+    rThreeTimer = rThreeTimer - 220;
+    rFourTimer = rFourTimer - 220;
+  } else {
+
+    // listen for incoming clients
+    WiFiClient client = server.available();
+
+
+
+    if (client) {
+      //Serial.println("new client");
+      // an http request ends with a blank line
+      boolean currentLineIsBlank = true;
+      String currentLine = "";
+
+      while (client.connected()) {
+        c++;
+        if (client.available()) {
+          char c = client.read();
+          //Serial.write(c);
+          // if you've gotten to the end of the line (received a newline
+          // character) and the line is blank, the http request has ended,
+          // so you can send a reply
+          if (c == '\n' && currentLineIsBlank) {
+            // send a standard http response header
+
+
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-Type: application/json");
+            client.println("Connection: close");  // the connection will be closed after completion of the response
+            //client.println("Refresh: 5");  // refresh the page automatically every 5 sec
+            client.println();
+            client.println("{\"Temp\":\"" + Temp + "\",\"Humidity\":\"" + Humidity + "\",\"Pressure\":\"" + Pressure + "\",\"r1t\":\"" + rOneTimer + "\",\"r2t\":\"" + rTwoTimer + "\",\"r3t\":\"" + rThreeTimer + "\",\"r4t\":\"" + rFourTimer + "\",\"HourRemaining\":\"" + sHourLeft + "\",\"MinutesRemaining\":\"" + sMinLeft + "\",\"SecondsRemaining\":\"" + sSecLeft + "\"}");
+            break;
+          }
+
+          else if (c != '\r') {    // if you got anything else but a carriage return character,
+            currentLine += c;      // add it to the end of the currentLine
+          }
+
+          if (currentLine.endsWith("GET /Update")) {
+            UpdateTime();
+            //ReadWeather();
+            delay(25);
+          }
+
+          if (currentLine.indexOf("GET") >= 0 && currentLine.endsWith("!")) {
+            String sAddMillis = Split(currentLine, '!', 1);
+            String relayName = Split(currentLine, '!', 2);
+            int addMillis = sAddMillis.toInt();
+            
+            
+
+            if(relayName == "rOne") {
+              if(addMillis == 0){
+                rOneON = true;
+                rOneTimer = 0;
+              }else{
+                rOneON = false;
+                rOneTimer = rOneTimer + addMillis;
+              }
+            }
+
+            if(relayName == "rTwo") {
+              if(addMillis == 0){  
+                rOneON = true;                            
+                rTwoTimer = 0;
+              }else{
+                rOneON = false;
+                rTwoTimer = rTwoTimer + addMillis;
+              }
+            }
+
+            if(relayName == "rThree") {
+                if(addMillis == 0){
+                  rThreeON = true;
+                  rThreeTimer = 0;
+              }else{
+                rThreeON = false;
+                rThreeTimer = rThreeTimer + addMillis;
+              }
+            }
+          
+            
+            if(relayName == "rFour") {
+              if(addMillis == 0){
+                rFourON = true;
+                rFourTimer = 0;
+              }else{
+                rFourON = false;
+                rFourTimer = rFourTimer + addMillis;
+              }
+            }
+            
+            if(relayName == "all") {
+              if(addMillis == 0){
+                rOneON = true;
+                rTwoON = true;
+                rThreeON = true;
+                rFourON = true;
+                rOneTimer = 0;
+                rTwoTimer = 0;
+                rThreeTimer = 0;
+                rFourTimer = 0;
+              }else{
+                    rOneON = false;
+                    rTwoON = false;
+                    rThreeON = false;
+                    rFourON = false;
+                   rOneTimer = rOneTimer + addMillis;
+                   rTwoTimer = rTwoTimer + addMillis;
+                   rThreeTimer = rThreeTimer + addMillis;
+                   rFourTimer = rFourTimer + addMillis;
+              }
+            }
+            
+                 Status = "Reading Line";
+                 delay(25);
+            }
+         
+        }
+   
+
+        delay(1);
+        if (c > 3500) {
+
+          Serial.println("Timeout " + String(c));
+          c = 0;
+          break;
+        }
+      
+    }
+
+      delay(10);
+
+      // close the connection:
+      client.stop();
+      delay(10);
+    }
+  }
+}
+
+
+void UpdateTime() {
+
+  if (! digitalRead(BUTTON_A)) {
+    //add 15 min to rOneTimer
+    rOneTimer = rOneTimer + 900000;
+    delay(250);
+  }
+
+  if (! digitalRead(BUTTON_B)) {
+    if(rOneTimer == 0){
+      fade(RedLED, 10, 2);
+      if(! digitalRead(BUTTON_B)){
+//        digitalWrite(rOne, HIGH);
+//        delay(200);
+//        digitalWrite(rTwo, HIGH);
+//        delay(200);
+//        digitalWrite(rThree, HIGH);
+//        delay(200);
+//        digitalWrite(rFour, HIGH);
+//        delay(200);
+          rOneON = true;
+          rTwoON = true;
+          rThreeON = true;
+          rFourON = true;
+          rOneTimer = 0;
+          rTwoTimer = 0;
+          rThreeTimer = 0;
+          rFourTimer = 0;
+      }
+    }else{
+        GrabTime = rOneTimer;
+        rOneTimer = 0;        
+        fade(RedLED, 2, 6);
+        if (! digitalRead(BUTTON_B)) {
+          rOneTimer = 120000;
+          fade(RedLED, 20, 2);
+        }
+        if(! digitalRead(BUTTON_A)) {
+          rOneON = false;
+          rTwoON = false;
+          rThreeON = false;
+          rFourON = false;
+          rOneTimer = GrabTime;
+          rTwoTimer = GrabTime;
+          rThreeTimer = GrabTime;
+          rFourTimer = GrabTime;
+          analogWrite(RedLED, low);
+          fade(GreenLED, 6, 2);
+        }
+      }
+    }
+  
+
+  if (! digitalRead(BUTTON_C)) {
+    //subtract 15 min to rOneTimer
+    rOneTimer = rOneTimer - 900000;
+    delay(250);
+  }
+
+
+  rOneTimer = rOneTimer - timetrim;
+  rTwoTimer = rTwoTimer - timetrim;
+  rThreeTimer = rThreeTimer - timetrim;
+  rFourTimer = rFourTimer - timetrim;
+
+  delay(1);
+  //RELAYONE
+  if (rOneTimer > 0)
+  {
+    
+    analogWrite(GreenLED, high);
+    analogWrite(RedLED, low);
+    if(!rOneON){
+      digitalWrite(rOne, LOW);
+      delay(200);
+    }
+    rOneON = true;
+  }
+  else
+  {
+    rOneTimer = 0;
+    //digitalWrite(LED_PIN, LOW);
+    analogWrite(GreenLED, low);
+    analogWrite(RedLED, high);
+    if(rOneON){
+      digitalWrite(rOne, HIGH);
+      delay(200);
+    }
+    rOneON = false;
+  }
+
+   delay(1);
+  //RELAYTWO
+  if (rTwoTimer > 0)
+  {
+    if(!rTwoON){
+      digitalWrite(rTwo, LOW);
+      delay(200);
+    }
+    rTwoON = true;
+  }
+  else
+  {
+    rTwoTimer = 0;
+    if(rTwoON){
+      digitalWrite(rTwo, HIGH);
+      delay(200);
+    }
+    rTwoON = false;
+  }
+
+ delay(1);
+  //RELAYTHREE
+  if (rThreeTimer > 0)
+  {
+    if(!rThreeON){
+      digitalWrite(rThree, LOW);
+      delay(200);
+    }
+    rThreeON = true;
+  }
+  else
+  {
+    rThreeTimer = 0;
+    if(rThreeON){
+      digitalWrite(rThree, HIGH);
+      delay(200);
+    }
+    rThreeON = false;
+  }
+
+ delay(1);
+  //RELAYFOUR
+  if (rFourTimer > 0)
+  {
+    if(!rFourON){
+      digitalWrite(rFour, LOW);
+      delay(200);
+    }
+    rFourON = true;
+  }
+  else
+  {
+    rFourTimer = 0;
+    if(rFourON){
+      digitalWrite(rFour, HIGH);
+      delay(200);
+    }
+    rFourON = false;
+  }
+      
+
+
+  //Display time only for relay one. 
+  hourLeft = rOneTimer / 3600000;
+  minLeft = rOneTimer / 60000;
+  secLeft = rOneTimer / 1000;
+  secLeft = secLeft - (minLeft * 60);
+  minLeft = minLeft - (hourLeft * 60);
+  sSecLeft = String(secLeft);
+  sMinLeft = String(minLeft);
+  sHourLeft = String(hourLeft);
+
+  if (sSecLeft.length() < 2) {
+    sSecLeft = "0" + sSecLeft;
+  }
+
+  if (sMinLeft.length() < 2) {
+    sMinLeft = "0" + sMinLeft;
+  }
+
+  if (sHourLeft.length() < 2) {
+    sHourLeft = "0" + sHourLeft;
+  }
+
+  tl = sHourLeft + ":" + sMinLeft + ":" + sSecLeft;
+
+  PrintScreenLinesPretty(tl, "T" + Temp + "|H" + Humidity + "|" + OutletStatus());
+  delay(10);
+}
+
+String OutletStatus(){
+  String os = "";
+
+  if(rOneON){
+    os = os + "+|";
+  }else{
+    os = os + "-|";
+  }
+
+  
+  if(rTwoON){
+    os = os + "+|";
+  }else{
+    os = os + "-|";
+  }
+
+  
+  if(rThreeON){
+    os = os + "+|";
+  }else{
+    os = os + "-|";
+  }
+
+  
+  if(rFourON){
+    os = os + "+|";
+  }else{
+    os = os + "-|";
+  }
+
+  return os;
+}
+
+void PrintScreenLines(String Line1, String Line2, String Line3, String Line4) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println(Line1);
+  display.println(Line2);
+  display.println(Line3);
+  display.println(Line4);
+  display.setCursor(0, 0);
+  display.display();
+}
+
+void PrintScreenLinesPretty(String Line1, String Line2) {
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(17, 0);
+  display.println(Line1);
+  display.setTextSize(1);
+  display.println("");
+  display.println(Line2);
+  display.setCursor(0, 0);
+  display.display();
+}
+
+void printWifiStatus() {
+  ip = WiFi.localIP();
+  long rssi = WiFi.RSSI();
+  PrintScreenLines("SSID: " + String(WiFi.SSID()), "IP: " + DisplayAddress(ip), "Port: " + String(port), "");
+}
+
+String DisplayAddress(IPAddress address)
+{
+  return String(address[0]) + "." +
+         String(address[1]) + "." +
+         String(address[2]) + "." +
+         String(address[3]);
+}
+
+//https://github.com/BenTommyE/Arduino_getStringPartByNr/blob/master/getStringPartByNr.ino
+String Split(String data, char separator, int index)
+{
+  // spliting a string and return the part nr index
+  // split by separator
+
+  int stringData = 0;        //variable to count data part nr
+  String dataPart = "";      //variable to hole the return text
+
+  for (int i = 0; i < data.length() - 1; i++) { //Walk through the text one letter at a time
+
+    if (data[i] == separator) {
+      //Count the number of times separator character appears in the text
+      stringData++;
+
+    } else if (stringData == index) {
+      //get the text when separator is the rignt one
+      dataPart.concat(data[i]);
+
+    } else if (stringData > index) {
+      //return text and stop if the next separator appears - to save CPU-time
+      return dataPart;
+      break;
+
+    }
+
+  }
+  //return text if this is the last part
+  return dataPart;
+}
+
+void fade(int pin, int numberoftimes, int delayms) {
+  for (int nottr = 0 ; nottr <= numberoftimes; nottr += 1) {
+    for (int fadeValue = 0 ; fadeValue <= 255; fadeValue += 5) {
+      // sets the value (range from 0 to 255):
+      analogWrite(pin, fadeValue);
+      // wait for 30 milliseconds to see the dimming effect
+      delay(delayms);
+    }
+
+    // fade out from max to min in increments of 5 points:
+    for (int fadeValue = 255 ; fadeValue >= 0; fadeValue -= 5) {
+      // sets the value (range from 0 to 255):
+      analogWrite(pin, fadeValue);
+      // wait for 30 milliseconds to see the dimming effect
+      delay(delayms);
+    }
+  }
+}
+
+void AlterFade(int pin,int altpin, int numberoftimes, int delayms) {
+
+  boolean goingUp = true;
+  int fadeDown = 0;
+  int fadeUP = 0;
+  
+  for (int nottr = 0 ; nottr <= numberoftimes; nottr += 1) {
+    for (int fadeUPc = 0 ; fadeUPc <= 255; fadeUPc += 5) {
+
+      fadeDown = 255 - fadeUPc;
+      fadeUP = fadeUPc;
+
+      if(fadeDown > 255){
+        fadeDown = 255;
+      }
+
+      if(fadeDown < 25){
+        fadeDown = 25;
+      }
+      if(fadeUP < 25){
+        fadeUP = 25;
+      }
+
+      
+      // sets the value (range from 0 to 255):
+      if(goingUp){
+      analogWrite(pin, fadeUP);
+      analogWrite(altpin, fadeDown);
+      }else{
+        analogWrite(altpin, fadeUP);
+        analogWrite(pin, fadeDown);
+      }
+      // wait for 30 milliseconds to see the dimming effect
+      delay(delayms);
+
+    }
+
+
+    for (int fadeUPc = 255 ; fadeUPc >= 0; fadeUPc -= 5) {
+      fadeDown = 255 - fadeUP;
+      fadeUP = fadeUPc;
+
+      if(fadeDown > 255){
+        fadeDown = 255;
+      }
+
+      if(fadeDown < 25){
+        fadeDown = 25;
+      }
+      if(fadeUP < 25){
+        fadeUP = 25;
+      }
+
+
+      
+      // sets the value (range from 0 to 255):
+      if(goingUp){
+      analogWrite(pin, fadeUP);
+      analogWrite(altpin, fadeDown);
+      }else{
+        analogWrite(altpin, fadeUP);
+        analogWrite(pin, fadeDown);
+      }
+      // wait for 30 milliseconds to see the dimming effect
+      delay(delayms);
+    }
+
+    if(goingUp){
+      goingUp = false;
+    }else{
+      goingUp = true;
+    }
+  }
+}
